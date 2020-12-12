@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href='https://api.mapbox.com/mapbox-gl-js/v1.8.1/mapbox-gl.css' rel='stylesheet'>
+    </link>
+    <title>Práctica 1 con mapbox</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+        html,
+        body,
+        #map {
+            height: 100%;
+            overflow: hidden;
+        }
+        #map {
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+        .map-overlay {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: #fff;
+            font-family: sans-serif;
+            overflow: auto;
+            margin-right: 20px;
+            border-radius: 5px;
+        }
+        
+        #legend {
+            line-height: 18px;    
+            width: 300px;
+        }
+        h3{
+            padding: .5em .3em;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        .values{
+           display: flex;
+           justify-content: space-between;
+      
+           padding: 0 1.5em;
+        }
+        .colors{
+           display: flex;
+           justify-content: space-between; 
+        }
+        .color{
+            height: 25px;
+            width: 60px;
+        }
+        .color.one{
+            background:#2d4f2e ;
+        }
+        .color.two{
+            background:#3c7654;
+        }
+        .color.three{
+            background:#469f82;
+        }
+        .color.four{
+            background:#4ccbb7;
+        }
+        .color.five{
+            background:#50f7f2 ;
+        }
+
+    </style>
+</head>
+
+<body> 
+    <div id="map"></div>
+    <div class="map-overlay" id="legend">
+        <h3 id="pd">SIV in Bogotá</h3>
+        <div class="values">
+            <div class="value">0</div>
+            <div class="value">100.75</div>
+            <div class="value">145</div>
+            <div class="value">220.75</div>
+            <div class="value">482</div>
+        </div>
+        <div class="colors">
+            <div class="color one"></div>
+            <div class="color two"></div>
+            <div class="color three"></div>
+            <div class="color four"></div>
+            <div class="color five"></div>
+        </div>
+    </div>
+    <script src='https://api.mapbox.com/mapbox-gl-js/v1.8.1/mapbox-gl.js'></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.1.0/chroma.min.js"></script>
+    <script type="text/javascript">
+        const token = 'pk.eyJ1IjoiZmFybWFrb3MiLCJhIjoiY2tndTA0amt2MDhqeTJ6cWw4bTlwa2NnaSJ9.bVtsTOGd4r7tq1QBpnYpQw'
+        const localities = 'data/lcl.geojson'
+        const sinv = 'data/siviales.geojson'
+        const idPolygons = 'dataPolygons'
+        const idLayerPoly ='layerPolygons'
+        const idChorop = 'layerChoropleth'
+        const idSdataHeatMap = 'dataHeatMap'
+        const idSivPts = 'layerPts'
+        const idSdataPts = 'dataSiv'
+        const idSivHeatMap = 'layerHeatMap'
+        const idLayerExtrude = 'layerExtrude'
+        const idExtrudePoly = 'datPolygons'
+        let xhr, dataPolygons, dataSinv
+        let map, geoDataInc
+        let hoverLayer = null
+
+        function loadMap() {
+            mapboxgl.accessToken = token
+            map = new mapboxgl.Map({
+                container: 'map',
+                style: 'mapbox://styles/mapbox/dark-v10',
+                center: [-74.08, 4.609],
+                zoom: 10,
+                pitch: 45,
+                bearing: 60,
+                hash: true
+            })
+            getNames()
+            map.on('load', function(){  
+                addResource(idPolygons, dataPolygons, 'geojson', false)
+                addResource(idSdataPts, dataSinv, 'geojson', true)
+                draw(idLayerPoly, idPolygons)
+                drawChoropletMap(idChorop, idPolygons)        
+                addChangeOpacity(idChorop, idPolygons)
+                drawSIV(idSivPts, idSdataPts)
+                addResource(idSdataHeatMap, geoDataInc, 'geojson', false)
+                heatMapSIV(idSivHeatMap, idSdataHeatMap)
+                 
+                /*Extrude*/
+                addResource(idExtrudePoly, dataPolygons, 'geojson', true)
+                extrudePolygons(idLayerExtrude, idExtrudePoly)
+            })
+        }
+
+        function readGeoFiles(url) {
+            return new Promise((resolve, reject) => {
+                xhr = new XMLHttpRequest()
+                xhr.overrideMimeType('application/json')
+                xhr.open('get', url, true)
+                xhr.onload = e => {
+                    if (xhr.readyState == 4 && xhr.status == 200) {
+                        let data = JSON.parse(xhr.responseText)
+                        resolve(data)
+                        console.log('resolve')
+                    } else {
+                        console.log('reject')
+                        return reject(xhr.status)
+                    }
+                }
+                xhr.send()
+            })
+        } 
+
+        function addResource(id, dat, sType, cluster){
+            if (cluster) {
+                map.addSource(id, {
+                    type: sType,
+                    data: dat,
+                    cluster: cluster,
+                    clusterMaxZoom: 14,
+                    clusterRadius: 50
+                })
+            } else {
+                map.addSource(id, {
+                    type: sType,
+                    data: dat
+                })
+            }
+        }
+
+        function addResources(id, data, type){
+            map.addSource(id, {type: type, data: data})
+        }
+
+        function draw(id, idSource){
+            map.addLayer({
+                id: id,
+                type: 'fill',
+                source: idSource,
+                layout: {visibility: 'none'},
+                paint:{
+                    'fill-color': '#83ecde',
+                    'fill-outline-color': '#fff',
+                    'fill-opacity': ['case', ['boolean',['feature-state', 'hover'], false], 1,.5]
+                }
+            })
+        }
+
+        function drawSIV(idLayer, idSource) {
+            map.addLayer({
+                'id': idLayer,
+                'type': 'circle',
+                'source': idSource,
+                'layout': {
+                    'visibility': 'visible'
+                },
+                paint: {
+                    'circle-color': '#4cd5ff',
+                    'circle-radius': 4,
+                    'circle-stroke-width': 1.5,
+                    'circle-stroke-color': '#fff'
+                }
+            })
+        }
+
+        function extrudePolygons(idLayer, idSource){
+            map.addLayer({
+                'id': idLayer,
+                'type': 'fill-extrusion',
+                'source': idSource,
+                'paint': {
+                    'fill-extrusion-height': 10000,
+                    'fill-extrusion-color': {
+                    'property': 'COD_LCL',
+                    'stops': [
+                        [0, '#2d4f2e'],
+                        [100.75, '#3c7654'],
+                        [145, '#469f82'],
+                        [220.75, '#44D4C1'],
+                        [482, '#50f7f2']
+                    ]
+                },
+                
+                'fill-extrusion-opacity': 1,
+                'fill-extrusion-base': 0
+                }
+            })
+
+        }
+        function drawChoropletMap(idLayer, idSource){
+            let dataChoroplet = []
+            let cantLocality =[]
+            let chpColorsMap = ['match', ['get', 'COD_LCL']]
+            
+            geoDataInc = {
+                'type': 'FeatureCollection',
+                'features': []
+            }
+            dataPolygons.features.forEach(item =>{
+                let locality = item.properties.COD_LCL
+                let incidents = dataSinv.features.filter(item => item.properties.COD_LCL === locality)
+
+                let lat = item.properties.geo_point_2d[0]
+                let lon = item.properties.geo_point_2d[1]
+                
+                let dic = {'COD_LCL':locality, 'CNTSIV': incidents.length}
+
+                let dic2 = {
+                    'type': 'Feature',
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': [lon, lat]
+                    },
+                    'properties': {
+                        'COD_LCL': locality,
+                        'CNTSIV': incidents.length
+                    }
+                }
+   
+                geoDataInc.features.push(dic2)
+                dataChoroplet.push(dic)
+                cantLocality.push(incidents.length)
+            })
+            let colorInterval = chroma.limits(cantLocality, 'q', 4)
+            let colorScale = chroma.scale(['#2D4F2E', '#50f7f2']).mode('lch').colors(5)
+            
+            dataChoroplet.forEach(item => {
+                let color = '#fff' 
+                for (let i in colorInterval) {
+                    if (item.CNTSIV <= colorInterval[i]) {
+                        color = colorScale[i]
+                        chpColorsMap.push(item.COD_LCL, color)
+                        break
+                    }
+                    
+                }
+            })
+            chpColorsMap.push('rgba(0, 0, 0, 0)')
+            map.addLayer({
+                id: idLayer,
+                type: 'fill',
+                source: idSource,
+                layout: {visibility: 'visible'},
+                paint:{
+                    'fill-color': chpColorsMap,
+                    'fill-outline-color': '#fff',
+                    'fill-opacity': ['case', ['boolean',['feature-state', 'hover'], false], .8,.5]
+                }
+            })
+        }
+        function heatMapSIV(idLayer, idSource){
+            map.addLayer({
+                id: idLayer,
+                type: 'heatmap',
+                source: idSource,
+                minzoom: 11,
+                layout: {
+                    'visibility': 'visible'
+                },
+                paint: {
+                    'heatmap-radius': ['interpolate', ['linear'],
+                        ['zoom'], 9, 80, 10, 120, 11, 200, 12, 300
+                    ],
+                    'heatmap-weight': ['interpolate', ['linear'],
+                        ['get', 'CNTSIV'], 0, 0, 50, .5, 150, 1, 230, 1.5, 480, 2
+                    ],
+                    'heatmap-color': ['interpolate', ['linear'],
+                        ['heatmap-density'],
+                        0, 'rgba(51,153,255,0)',
+                       .2, 'rgba(51,153,255,.7)',
+                       .5, 'rgba(51, 204, 51, .7 )',
+                       .8, 'rgba(255,204,102,.7)',
+                        1, 'rgba(255,0,0,.7)'
+                    ]
+                }
+
+            })
+
+        }
+
+        function addChangeOpacity(idLayer, idSource) {
+            map.on('mousemove', idLayer, e =>{
+                if (hoverLayer) {
+                    map.setFeatureState({
+                        source: idSource,
+                        id: hoverLayer
+                    }, {
+                        hover: false
+                    })
+                }
+                hoverLayer = e.features[0].id
+                map.setFeatureState({
+                    source: idSource,
+                    id: hoverLayer
+                },
+                {
+                    hover: true
+                })
+            })
+            map.on('mouseleave', idLayer, e => {
+                if (hoverLayer) {
+                    map.setFeatureState({
+                        source: idSource,
+                        id: hoverLayer
+                    },
+                    {
+                        hover: false
+                    })
+                }
+            })
+        }
+        
+        function getNames(){
+            map.on('load', () =>{    
+                map.addSource('names-localities', {
+                "type": "geojson",
+                "data": {
+                    "type": "FeatureCollection",
+                    "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.10284240061449, 4.588770674796082]
+                        },
+                        "properties": {
+                        "name": "Antonio Nariño"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.08576901958143, 4.641173586592107]
+                        },
+                        "properties": {
+                        "name": "Teusaquillo"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.25697871800469, 4.036568747869632]
+                        },
+                        "properties": {
+                        "name": "Sumapaz"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.06607256050648, 4.548749008988841]
+                        },
+                        "properties": {
+                        "name": "San Cristobal"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.02782483459404, 4.742092413856286]
+                        },
+                        "properties": {
+                        "name": "Usaquen",
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.13598945142014, 4.574841398493447]
+                        },
+                        "properties": {
+                        "name": "Tunjuelito"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.19438893446508, 4.621779959835884]
+                        },
+                        "properties": {
+                        "name": "Bosa"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.111580233529, 4.616245470318945]
+                        },
+                        "properties": {
+                        "name": "Puente Aranda"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.16195890440652, 4.482460265935783]
+                        },
+                        "properties": {
+                        "name": "Ciudad Bolivar"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.0758452755469, 4.763208121309928]
+                        },
+                        "properties": {
+                        "name": "Suba"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.11336318293525, 4.566476900860273]
+                        },
+                        "properties": {
+                        "name": "Rafael Uribe Uribe"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.15266762383382, 4.630347351356089]
+                        },
+                        "properties": {
+                        "name": "Kennedy"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.14280649581936, 4.390025128368803]
+                        },
+                        "properties": {
+                        "name": "Usme"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.08794786812679, 4.607155934954456]
+                        },
+                        "properties": {
+                        "name": "Los Martires"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.0362175815148, 4.593972728724716]
+                        },
+                        "properties": {
+                        "name": "Santa Fe"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.07355160510068, 4.669566933458008]
+                        },
+                        "properties": {
+                        "name": "Barrios Unidos"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.14015130074624, 4.678182925952192]
+                        },
+                        "properties": {
+                        "name": "Fontibon"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.113187703298, 4.701125563272901]
+                        },
+                        "properties": {
+                        "name": "Engativa"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.07207079532802, 4.596605075136378]
+                        },
+                        "properties": {
+                        "name": "Candelaria"
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                        "type": "Point",
+                        "coordinates": [-74.03688302787386, 4.644982720078637]
+                        },
+                        "properties": {
+                        "name": "Chapinero"
+                        }
+                    }
+                    ]
+                }
+                })
+                map.addLayer({
+                    'id': 'localities',
+                    'type': 'symbol',
+                    'source': 'names-localities',
+                    'layout': {
+                        'text-field': ['get', 'name'],
+                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                        'text-offset': [0, 1],
+                        'text-size': 13, 
+                        'text-transform': 'uppercase'  
+                    },
+                    'paint':{
+                        'text-color': '#fff'
+                    }
+                })
+
+            })
+        }
+        let loadingFiles = readGeoFiles(localities)
+        loadingFiles.then(data => dataPolygons = data)
+                    .then(res => readGeoFiles(sinv))
+                    .then(data => dataSinv = data)
+                    .then(res => loadMap())
+                    
+    </script>
+
+</body>
+
+</html>
